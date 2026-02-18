@@ -1,0 +1,247 @@
+import { StyleSheet, ColorSchemeName } from 'react-native';
+import { getColors, getStyles } from './GlobalStyles';
+
+export function getTransactionsScreenStyles(scheme: ColorSchemeName = 'light') {
+  const normalizedScheme = !scheme ? 'light' : scheme;
+  const colors = getColors(normalizedScheme);
+  const global = getStyles(normalizedScheme);
+  return StyleSheet.create({
+    container: {
+      ...global.container,
+      backgroundColor: global.container.backgroundColor,
+      paddingHorizontal: 16,
+    },
+    headerRow: {
+      ...global.row,
+      width: '100%',
+      marginBottom: 24,
+    },
+    headerText: {
+      ...global.title,
+      fontSize: 28,
+      color: global.title.color,
+    },
+    card: {
+      ...global.card,
+      borderRadius: 10,
+      padding: 20,
+      marginVertical: 12,
+      backgroundColor: '#eaeaeaff',
+      elevation: 4,
+      position: 'relative',
+    },
+    oneLineRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      columnGap: 8 as any,
+    },
+    separator: {
+      marginHorizontal: 6,
+      color: colors.disabledText,
+    },
+    inlineIcon: {
+      marginRight: 4,
+      opacity: 0.8,
+      color: colors.secondary,
+    },
+    propertySmall: {
+      color: colors.onSurface,
+      opacity: 0.75,
+      fontSize: 12,
+      flexShrink: 1,
+    },
+    mutedText: {
+      color: colors.onSurface,
+      opacity: 0.8,
+      fontSize: 12,
+    },
+    cardActions: {
+      display: 'none',
+    },
+    filterCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      paddingVertical: 12,
+      paddingHorizontal: 10,
+      marginBottom: 10,
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+    },
+    filterSection: {
+      marginBottom: 10,
+    },
+    filterHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    filterHeaderIcon: {
+      marginRight: 6,
+      opacity: 0.7,
+      color: colors.secondary,
+    },
+    chipRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    cardActionsRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      gap: 10,
+      marginLeft: 12,
+    },
+    actionBtn: {
+      marginLeft: 0,
+      padding: 6,
+    },
+    bottomRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 10,
+      gap: 8,
+    },
+    dateRight: {
+      fontWeight: 'bold',
+      fontSize: 15,
+      color: colors.onSurface,
+      textAlign: 'right',
+      minWidth: 90,
+    },
+  typeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 0,
+  },
+    typeLabel: {
+      fontSize: 15,
+      color: colors.primary,
+      marginLeft: 8,
+      fontWeight: '500',
+    },
+    description: {
+      fontSize: 14,
+      color: colors.onSurface,
+      marginTop: 2,
+      marginBottom: 8,
+      fontStyle: 'italic',
+      fontWeight: '400',
+    },
+    property: {
+      fontSize: 14,
+      color: colors.secondary,
+      marginTop: 0,
+      marginBottom: 0,
+      fontWeight: '600',
+    },
+    account: {
+      fontSize: 13,
+      color: colors.secondary,
+      marginTop: 0,
+      marginBottom: 0,
+      fontStyle: 'italic',
+      fontWeight: '400',
+    },
+    amount: {
+      fontSize: 14,
+      color: colors.primary,
+      marginTop: 0,
+      marginBottom: 0,
+      fontWeight: '800',
+    },
+    filterBar: {
+      flexDirection: 'row',
+      paddingVertical: 8,
+      marginBottom: 8,
+      backgroundColor: colors.surface,
+      borderRadius: 10,
+      paddingHorizontal: 4,
+      elevation: 1,
+    },
+    searchContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.outline,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      marginHorizontal: 4,
+      marginBottom: 8,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      paddingVertical: 6,
+      color: colors.onSurface,
+    },
+    searchIcon: {
+      marginRight: 8,
+      opacity: 0.7,
+    },
+    searchClear: {
+      marginLeft: 6,
+      padding: 2,
+    },
+  filterItem: {
+    marginRight: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+    filterLabel: {
+      fontWeight: '600',
+      marginRight: 4,
+      color: colors.onSurface,
+    },
+    filterOption: {
+      backgroundColor: colors.secondaryContainer,
+      borderRadius: 18,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      marginHorizontal: 4,
+      borderWidth: 1,
+      borderColor: 'transparent',
+    },
+    filterOptionActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    filterOptionText: {
+      color: colors.onSurface,
+      fontSize: 13,
+      fontWeight: '500',
+    },
+    filterOptionTextActive: {
+      color: colors.onPrimary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    filterInput: {
+      borderWidth: 1,
+      borderColor: colors.outline,
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      minWidth: 90,
+      marginHorizontal: 4,
+      backgroundColor: colors.surface,
+    },
+    fab: {
+      position: 'absolute',
+      right: 24,
+      bottom: 32,
+      backgroundColor: colors.primary,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      justifyContent: 'center',
+      alignItems: 'center',
+      elevation: 6,
+    },
+  });
+}
