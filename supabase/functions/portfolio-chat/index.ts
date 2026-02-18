@@ -9,6 +9,7 @@ declare const Deno: {
 };
 
 type ChatRole = 'system' | 'user' | 'assistant';
+type ChatMode = 'requirements' | 'research' | 'chat' | 'chat-stream';
 
 type ChatMessage = {
   role: ChatRole;
@@ -61,7 +62,7 @@ type ChatRequest = {
   messages?: ChatMessage[];
   portfolio?: PortfolioSnapshot;
   context?: ChatContext;
-  mode?: 'requirements';
+  mode?: ChatMode;
   stream?: boolean;
 };
 
@@ -664,7 +665,8 @@ const handleStreamingRequest = async (
   message: string,
   messages: ChatMessage[],
   portfolio: PortfolioSnapshot | undefined,
-  context: ChatContext | undefined
+  context: ChatContext | undefined,
+  mode: ChatMode
 ) => {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -711,7 +713,7 @@ const handleStreamingRequest = async (
           return;
         }
 
-        const wantsResearch = isResearchRequest(message);
+        const wantsResearch = mode === 'research';
         const researchAddress = wantsResearch ? extractResearchAddress(message) : '';
         let researchSources: ResearchSource[] = [];
         let missingDomains: string[] = [];
@@ -863,7 +865,10 @@ serve(async (req: Request) => {
       });
     }
 
-    if (mode === 'requirements') {
+    const resolvedMode: ChatMode = mode ?? (stream ? 'chat-stream' : 'chat');
+    const legacyWantsResearch = !mode && isResearchRequest(message);
+
+    if (resolvedMode === 'requirements') {
       console.log('Portfolio chat requirements mode');
       const required = getRequiredData(message);
       console.log('Portfolio chat requirements result', required);
@@ -873,9 +878,10 @@ serve(async (req: Request) => {
       });
     }
 
-    if (stream) {
+    if (resolvedMode === 'chat-stream' || (stream && legacyWantsResearch)) {
       console.log('Portfolio chat streaming mode enabled');
-      return await handleStreamingRequest(message, messages, portfolio, context);
+      const streamMode: ChatMode = legacyWantsResearch ? 'research' : 'chat-stream';
+      return await handleStreamingRequest(message, messages, portfolio, context, streamMode);
     }
 
     const apiKey = Deno.env.get('OPENROUTER_API_KEY') ?? '';
@@ -892,7 +898,7 @@ serve(async (req: Request) => {
       });
     }
 
-    const wantsResearch = isResearchRequest(message);
+    const wantsResearch = resolvedMode === 'research' || legacyWantsResearch;
     console.log('Portfolio chat research check', { wantsResearch });
     const researchAddress = wantsResearch ? extractResearchAddress(message) : '';
     let researchSources: ResearchSource[] = [];

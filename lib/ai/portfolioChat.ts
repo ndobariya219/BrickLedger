@@ -2,6 +2,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, supabase } from '@/lib/supabase';
 import { Logger } from '@/lib/logger';
 
 type ChatRole = 'system' | 'user' | 'assistant';
+type ChatMode = 'requirements' | 'research' | 'chat' | 'chat-stream';
 
 export interface ChatMessage {
   role: ChatRole;
@@ -63,6 +64,29 @@ const EDGE_FUNCTION_NAME = 'portfolio-chat';
 
 const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/${EDGE_FUNCTION_NAME}`;
 const STREAM_CONTENT_TYPE = 'text/event-stream';
+const DEFAULT_STAGE = 'Thinking';
+
+const normalizeStage = (stage: string) => {
+  const trimmed = stage.trim();
+  if (!trimmed) return DEFAULT_STAGE;
+  return trimmed.length > 64 ? `${trimmed.slice(0, 61)}...` : trimmed;
+};
+
+const scheduleStages = (
+  stages: Array<{ stage: string; delayMs: number }>,
+  onStatus?: (status: ChatStatusEvent) => void
+) => {
+  const timers: Array<ReturnType<typeof setTimeout>> = [];
+  stages.forEach(({ stage, delayMs }) => {
+    timers.push(
+      setTimeout(() => {
+        onStatus?.({ stage: normalizeStage(stage) });
+      }, delayMs)
+    );
+  });
+
+  return () => timers.forEach(timerId => clearTimeout(timerId));
+};
 export const isResearchRequest = (message: string) => {
   const trimmed = message.trim();
   const keywordMatch = /(do\s+)?research\s+on|property\s+research|investor\s+assessment|analyse\s+address|analyze\s+address/i.test(
@@ -105,7 +129,8 @@ export async function sendPortfolioChatMessage(
   message: string,
   messages: ChatMessage[],
   portfolio: PortfolioSnapshot,
-  context: ChatContext
+  context: ChatContext,
+  mode: ChatMode = 'chat'
 ) {
   const transactionId = Logger.createTransactionId();
   Logger.info('sendPortfolioChatMessage called', { message: message }, 'portfolioChat.ts', transactionId);
@@ -116,6 +141,7 @@ export async function sendPortfolioChatMessage(
       messages,
       portfolio,
       context,
+      mode,
     },
   });
 
@@ -172,6 +198,50 @@ export async function sendPortfolioChatMessageStream(
   const transactionId = Logger.createTransactionId();
   Logger.info('sendPortfolioChatMessageStream called', { message: message }, 'portfolioChat.ts', transactionId);
 
+  const emitStatus = (stage: string) => {
+    handlers?.onStatus?.({ stage: normalizeStage(stage) });
+  };
+
+  const wantsResearch = isResearchRequest(message);
+  if (wantsResearch) {
+    emitStatus('Analyzing request');
+    const cancelStages = scheduleStages(
+      [
+        { stage: 'Running search', delayMs: 600 },
+        { stage: 'Summarizing research', delayMs: 1800 },
+        { stage: 'Finalizing research', delayMs: 2800 },
+      ],
+      handlers?.onStatus
+    );
+
+    try {
+      const { data, error } = await supabase.functions.invoke(EDGE_FUNCTION_NAME, {
+        body: {
+          message,
+          messages,
+          portfolio,
+          context,
+          mode: 'research',
+        },
+      });
+
+      if (error) {
+        Logger.error('Portfolio research failed', { error }, 'portfolioChat.ts', transactionId);
+        throw error;
+      }
+
+      const reply = data?.reply || data?.message || data?.content;
+      if (!reply) {
+        Logger.warn('Portfolio research returned empty reply', { data }, 'portfolioChat.ts', transactionId);
+        return 'I could not generate a response right now. Please try again.';
+      }
+
+      return String(reply);
+    } finally {
+      cancelStages();
+    }
+  }
+
   Logger.info(
     'sendPortfolioChatMessageStream payload',
     {
@@ -200,6 +270,7 @@ export async function sendPortfolioChatMessageStream(
       portfolio,
       context,
       stream: true,
+      mode: 'chat-stream',
     }),
   });
 
@@ -232,23 +303,14 @@ export async function sendPortfolioChatMessageStream(
     transactionId
   );
   if (!hasStream) {
-    const stageTimers: Array<ReturnType<typeof setTimeout>> = [];
-    const emitStage = (stage: string, delayMs: number) => {
-      stageTimers.push(
-        setTimeout(() => {
-          handlers?.onStatus?.({ stage });
-        }, delayMs)
-      );
-    };
-
-    emitStage('Analyzing request', 0);
-    if (isResearchRequest(message)) {
-      emitStage('Running search', 900);
-      emitStage('Defining strategies', 1900);
-    } else {
-      emitStage('Defining strategies', 900);
-    }
-    emitStage('Drafting response', 2800);
+    const cancelStages = scheduleStages(
+      [
+        { stage: 'Analyzing request', delayMs: 0 },
+        { stage: 'Defining strategies', delayMs: 900 },
+        { stage: 'Drafting response', delayMs: 2400 },
+      ],
+      handlers?.onStatus
+    );
 
     Logger.info(
       'sendPortfolioChatMessageStream fallback to non-stream',
@@ -257,9 +319,9 @@ export async function sendPortfolioChatMessageStream(
       transactionId
     );
     try {
-      return await sendPortfolioChatMessage(message, messages, portfolio, context);
+      return await sendPortfolioChatMessage(message, messages, portfolio, context, 'chat');
     } finally {
-      stageTimers.forEach(timerId => clearTimeout(timerId));
+      cancelStages();
     }
   }
 
@@ -324,7 +386,7 @@ export async function sendPortfolioChatMessageStream(
           'portfolioChat.ts',
           transactionId
         );
-        handlers?.onStatus?.({ stage });
+        handlers?.onStatus?.({ stage: normalizeStage(stage) });
       }
 
       if (inferredEvent === 'delta') {

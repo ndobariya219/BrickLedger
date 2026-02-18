@@ -59,6 +59,12 @@ export function AskAIChat({ loadPortfolioForPrompt }: AskAIChatProps) {
   const [thinkingDots, setThinkingDots] = useState('');
   const debugTag = useRef(`AskAIChat-${Date.now()}`).current;
 
+  const normalizeStage = (stage: string) => {
+    const trimmed = stage.trim();
+    if (!trimmed) return 'Thinking';
+    return trimmed.length > 64 ? `${trimmed.slice(0, 61)}...` : trimmed;
+  };
+
   const thinkingEmoji = useMemo(() => {
     const stage = thinkingStage.toLowerCase();
     if (stage.includes('gather') || stage.includes('portfolio')) return '🧾';
@@ -232,7 +238,7 @@ export function AskAIChat({ loadPortfolioForPrompt }: AskAIChatProps) {
         {
           onStatus: ({ stage }) => {
             Logger.info('AskAIChat status event', { debugTag, stage }, 'AskAIChat.tsx', transactionId);
-            setThinkingStage(stage);
+            setThinkingStage(normalizeStage(stage));
           },
         }
       );
