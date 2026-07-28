@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { View, Text, ScrollView, ActivityIndicator, Dimensions, StyleSheet, TextInput, TouchableOpacity, Modal } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator, Dimensions, StyleSheet, TextInput, TouchableOpacity, Modal, type DimensionValue } from 'react-native';
 import { fetchUserProperties } from '@/lib/supabase/properties';
 import { fetchUserMortgageAccounts, fetchAccountsForEntities } from '@/lib/supabase/accounts';
 import { getCurrentUser } from '@/lib/supabase/auth';
@@ -474,10 +474,11 @@ export default function DashboardScreen() {
   // For now, use mock data or add logic to fetch and aggregate
   const [summaryMetrics, setSummaryMetrics] = useState<any>(null);
   const [propertyScores, setPropertyScores] = useState<any[]>([]);
+  const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [breakdownModalVisible, setBreakdownModalVisible] = useState(false);
   const [selectedScore, setSelectedScore] = useState<any | null>(null);
   const [chartTab, setChartTab] = useState<'distribution' | 'ownership'>('distribution');
-  const [isFinancialSummaryExpanded, setIsFinancialSummaryExpanded] = useState(false);
+  const [expandedPropertyScores, setExpandedPropertyScores] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     Logger.info('useEffect: properties/accounts/mortgages/weights changed (summary metrics)', { properties, soldProperties, accounts, mortgages, weights }, 'DashboardScreen.tsx');
@@ -510,6 +511,15 @@ export default function DashboardScreen() {
         }
         transactions = allTx;
       }
+
+      const latestFiveTransactions = [...(transactions || [])]
+        .sort((a: any, b: any) => {
+          const aTs = new Date(a?.date || 0).getTime();
+          const bTs = new Date(b?.date || 0).getTime();
+          return bTs - aTs;
+        })
+        .slice(0, 5);
+      setRecentTransactions(latestFiveTransactions);
 
       // Aggregate using correct type values
       let overallIncome = 0;
@@ -699,6 +709,300 @@ export default function DashboardScreen() {
     return `$${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
+  const formatMillions = (value: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '0.00';
+    return (value / 1000000).toFixed(2);
+  };
+
+  const formatTransactionDate = (value?: string) => {
+    if (!value) return '-';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const getTransactionTypeIcon = (type?: string) => {
+    const t = String(type || '').toUpperCase();
+    if (t === 'RENT') return 'cash-multiple';
+    if (t === 'MORTGAGE' || t === 'INTEREST') return 'bank-outline';
+    if (t === 'EXPENSE' || t === 'OUT_OF_POCKET') return 'receipt-text-outline';
+    return 'swap-horizontal';
+  };
+
+  const getTransactionTypeLabel = (type?: string) => String(type || 'TRANSACTION').replaceAll('_', ' ');
+
+  const propertyAddressById = (() => {
+    const map: Record<string, string> = {};
+    [...(properties || []), ...(soldProperties || [])].forEach((p: any) => {
+      if (!p?.id) return;
+      map[String(p.id)] = String(p.address || '').trim();
+    });
+    return map;
+  })();
+
+  const getTransactionPropertyAddress = (tx: any) => {
+    const propertyId = String(tx?.propertyid ?? tx?.property_id ?? tx?.propertyId ?? '');
+    if (!propertyId) return 'Unknown Property';
+    return propertyAddressById[propertyId] || 'Unknown Property';
+  };
+
+  const renderRecentTransactionsTimeline = (keyPrefix: string) => {
+    if (recentTransactions.length === 0) {
+      return (
+        <View style={{ borderRadius: 10, borderWidth: 1, borderColor: uiTheme.divider, backgroundColor: uiTheme.surfaceSoft, padding: 10 }}>
+          <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>No recent transactions found.</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={{ paddingTop: 2 }}>
+        {recentTransactions.map((tx: any, idx: number) => {
+          const isLast = idx === recentTransactions.length - 1;
+          const nodeSize = layoutRhythm.timelineNode;
+          return (
+            <View key={`${keyPrefix}-${tx.id ?? `${tx.date}-${tx.amount}-${tx.type}`}-${idx}`} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingBottom: isLast ? 0 : layoutRhythm.timelineRowGap }}>
+              <View style={{ width: nodeSize + 6, alignItems: 'center' }}>
+                <View
+                  style={{
+                    width: nodeSize,
+                    height: nodeSize,
+                    borderRadius: nodeSize / 2,
+                    borderWidth: 1,
+                    borderColor: uiTheme.divider,
+                    backgroundColor: uiTheme.surfaceSoft,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 2,
+                  }}
+                >
+                  <MaterialCommunityIcons name={getTransactionTypeIcon(tx.type)} size={12} color={uiTheme.textMuted} />
+                </View>
+                {!isLast && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: nodeSize,
+                      width: 2,
+                      height: layoutRhythm.timelineLineHeight,
+                      backgroundColor: uiTheme.divider,
+                    }}
+                  />
+                )}
+              </View>
+
+              <View
+                style={{
+                  flex: 1,
+                  marginLeft: 8,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: uiTheme.divider,
+                  backgroundColor: uiTheme.surfaceSoft,
+                  paddingHorizontal: 10,
+                  paddingVertical: 9,
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary, fontWeight: '600' }} numberOfLines={1}>
+                    {tx.description || getTransactionTypeLabel(tx.type)}
+                  </Text>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: uiTheme.textPrimary, marginLeft: 8 }} numberOfLines={1}>
+                    {formatCurrency(Number(tx.amount) || 0)}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 10, color: uiTheme.textMuted, marginTop: 5 }} numberOfLines={1}>
+                  {getTransactionPropertyAddress(tx)} • {getTransactionTypeLabel(tx.type)} • {formatTransactionDate(tx.date)}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const lastUpdatedLabel = new Date().toLocaleDateString('en-AU', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+  const windowWidth = Dimensions.get('window').width;
+  const isCompactPortfolioCards = windowWidth < 760;
+  const portfolioTilesPerRow = windowWidth >= 1100 ? 6 : windowWidth >= 760 ? 3 : 2;
+  const summaryValueFontSize = windowWidth >= 1200 ? 44 : windowWidth >= 900 ? 38 : 32;
+  const summaryLabelFontSize = windowWidth >= 1200 ? 13 : 12;
+  const scoringDualPane = windowWidth >= 1220;
+  const layoutRhythm = {
+    sectionGap: 14,
+    tileGap: 12,
+    timelineNode: isCompactPortfolioCards ? 20 : 22,
+    timelineLineHeight: isCompactPortfolioCards ? 30 : 34,
+    timelineRowGap: isCompactPortfolioCards ? 12 : 14,
+  } as const;
+  const totalPortfolioEquity =
+    (Number(dashboardData.equity) || 0);
+  const totalPortfolioNetWorth =
+    (Number(dashboardData.totalAssets) || 0) +
+    (Number(dashboardData.currentAssets) || 0) -
+    (Number(dashboardData.totalLiabilities) || 0);
+  const portfolioTileWidth: DimensionValue = `${100 / portfolioTilesPerRow}%`;
+  const semanticColors = {
+    info: '#0f2b57',
+    infoSoft: '#e9eef9',
+    success: '#1e4a84',
+    successSoft: '#eaf2ff',
+    violet: '#355f9d',
+    violetSoft: '#eef3ff',
+    warning: '#9b6a00',
+    warningSoft: '#fff5d9',
+    orange: '#a26500',
+    orangeSoft: '#fff1cc',
+    roi: '#102a54',
+    roiSoft: '#edf2fc',
+    growth: '#133a73',
+    growthSoft: '#eaf0fb',
+    lvr: '#2b416d',
+    lvrSoft: '#edf1f8',
+    iconChip: '#ffffff',
+  } as const;
+  const portfolioSummaryTiles = [
+    {
+      key: 'properties',
+      value: String(unsoldProperties.length),
+      label: 'Properties',
+      backgroundColor: semanticColors.infoSoft,
+      icon: 'home-city-outline' as const,
+      iconColor: semanticColors.info,
+    },
+    {
+      key: 'fixed-assets',
+      value: formatMillions(Number(dashboardData.totalAssets) || 0),
+      label: 'Fixed Assets $m',
+      backgroundColor: semanticColors.successSoft,
+      icon: 'office-building' as const,
+      iconColor: semanticColors.success,
+    },
+    {
+      key: 'loans',
+      value: formatMillions(Number(dashboardData.totalLiabilities) || 0),
+      label: 'Total Loans $m',
+      backgroundColor: semanticColors.violetSoft,
+      icon: 'credit-card-outline' as const,
+      iconColor: semanticColors.violet,
+    },
+    {
+      key: 'total-equity',
+      value: formatMillions(totalPortfolioEquity),
+      label: 'Available Equity $m',
+      backgroundColor: semanticColors.orangeSoft,
+      icon: 'chart-line-variant' as const,
+      iconColor: semanticColors.orange,
+    },
+    {
+      key: 'current-assets',
+      value: formatMillions(Number(dashboardData.currentAssets) || 0),
+      label: 'Current Assets $m',
+      backgroundColor: semanticColors.successSoft,
+      icon: 'wallet-outline' as const,
+      iconColor: semanticColors.success,
+    },
+    
+    {
+      key: 'net-worth',
+      value: formatMillions(totalPortfolioNetWorth),
+      label: 'Net Worth $m',
+      backgroundColor: semanticColors.orangeSoft,
+      icon: 'bank-outline' as const,
+      iconColor: semanticColors.orange,
+    },
+    
+  ];
+  const portfolioIndicators = [
+    {
+      key: 'roi',
+      label: 'ROI',
+      value: `${dashboardData.roi}%`,
+      icon: 'chart-bell-curve' as const,
+      color: semanticColors.roi,
+      backgroundColor: semanticColors.roiSoft,
+      iconBg: '#ffe8a3',
+    },
+    {
+      key: 'growth',
+      label: 'Growth',
+      value: `${dashboardData.capitalGrowth}%`,
+      icon: 'trending-up' as const,
+      color: semanticColors.growth,
+      backgroundColor: semanticColors.growthSoft,
+      iconBg: '#e4d5ff',
+    },
+    {
+      key: 'lvr',
+      label: 'Portfolio LVR',
+      value: `${dashboardData.lvr}%`,
+      icon: 'percent' as const,
+      color: semanticColors.lvr,
+      backgroundColor: semanticColors.lvrSoft,
+      iconBg: '#ffd0ba',
+    },
+  ];
+  const uiTheme = {
+    pageBg: '#f3f6fb',
+    surface: '#ffffff',
+    surfaceSoft: '#f7f9fd',
+    border: '#d6e0ee',
+    divider: '#e7eef8',
+    textPrimary: '#0b1f3d',
+    textSecondary: '#1e3a64',
+    textMuted: '#60738f',
+    accent: '#102a54',
+    accentSoft: '#e8eef9',
+    link: '#102a54',
+    danger: '#b4232a',
+    warning: '#9b6a00',
+    radiusCard: 16,
+    radiusItem: 12,
+  } as const;
+  const webUi = {
+    shellBg: '#f7f9fe',
+    shellBorder: '#dbe4f2',
+    shellInset: '#edf2f9',
+    shellRadius: 22,
+    sectionShadow: {
+      shadowColor: '#0f172a',
+      shadowOpacity: 0.06,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 2,
+    },
+  } as const;
+  const sectionCardStyle = {
+    backgroundColor: uiTheme.surface,
+    borderRadius: uiTheme.radiusCard,
+    borderWidth: 1,
+    borderColor: uiTheme.border,
+    ...webUi.sectionShadow,
+  } as const;
+  const tileIconSizing = {
+    summaryChip: isCompactPortfolioCards ? 26 : 32,
+    summaryIcon: isCompactPortfolioCards ? 16 : 19,
+    indicatorChip: isCompactPortfolioCards ? 28 : 32,
+    indicatorIcon: isCompactPortfolioCards ? 16 : 18,
+    propertyMetricChip: isCompactPortfolioCards ? 16 : 18,
+    propertyMetricIcon: isCompactPortfolioCards ? 10 : 11,
+    propertyMetricIconRight: isCompactPortfolioCards ? 2 : 3,
+    propertyMetricIconTop: isCompactPortfolioCards ? 1 : 0,
+    propertyMetricPaddingRight: isCompactPortfolioCards ? 22 : 24,
+    propertyHeaderIcon: isCompactPortfolioCards ? 16 : 18,
+    financialChip: isCompactPortfolioCards ? 20 : 22,
+    financialIcon: isCompactPortfolioCards ? 12 : 13,
+    financialIconRight: isCompactPortfolioCards ? 8 : 10,
+    financialIconTop: isCompactPortfolioCards ? 8 : 10,
+    scoreBadge: isCompactPortfolioCards ? 30 : 32,
+    scoreBadgeText: isCompactPortfolioCards ? 10 : 11,
+  } as const;
+
   const clampWidth = (score: number) => {
     if (typeof score !== 'number' || Number.isNaN(score)) return 0;
     return Math.max(0, Math.min(100, Math.round(score)));
@@ -706,9 +1010,14 @@ export default function DashboardScreen() {
 
   const getScoreColor = (score: number) => {
     const s = clampWidth(score);
-    if (s < 50) return '#eb3b5a'; // red
-    if (s < 80) return '#fd9644'; // orange
-    return '#2eaf7d'; // green
+    if (s < 50) return uiTheme.danger;
+    if (s < 80) return uiTheme.warning;
+    return uiTheme.accent;
+  };
+
+  const togglePropertyScoreAccordion = (propertyId: string | number) => {
+    const key = String(propertyId);
+    setExpandedPropertyScores((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   // Weight controls moved to UserAccountScreen
@@ -729,97 +1038,186 @@ export default function DashboardScreen() {
     );
   }
   return (
-    <ScrollView style={[styles.container]} contentContainerStyle={{ paddingBottom: 48 }}>
-      <View style={{flex: 1}}>
-        <View style={[styles.headerRow, { marginBottom: 12, marginTop: 6 }]}> 
-          <Text style={[styles.headerText, { fontSize: 24 }]}>Portfolio Overview</Text>
-        </View>
-        
-        {selectedEntity === 'all' && (
-          <View style={[styles.card, {
-            backgroundColor: '#e1f0ff',
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingVertical: 8,
-            paddingHorizontal: 10,
-            elevation: 1,
-          }]}
+    <ScrollView style={[styles.container, { backgroundColor: uiTheme.pageBg }]} contentContainerStyle={{ paddingBottom: 64, paddingHorizontal: 18, paddingTop: 16 }}>
+      <View style={{ flex: 1, width: '100%', alignSelf: 'center' }}>
+        <View
+          style={{
+            backgroundColor: webUi.shellBg,
+            borderWidth: 1,
+            borderColor: webUi.shellBorder,
+            borderRadius: webUi.shellRadius,
+            paddingHorizontal: 14,
+            paddingVertical: 14,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderWidth: 1,
+              borderColor: webUi.shellInset,
+              borderRadius: 14,
+              backgroundColor: '#ffffff',
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              marginBottom: 12,
+            }}
           >
-            <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 6, marginBottom: 4 }}>
-              <Text style={[styles.label, { textAlign: 'left' }]}>Portfolio Summary</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: uiTheme.accent, marginRight: 8 }} />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: uiTheme.textSecondary }}>Dashboard Workspace</Text>
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 12 }}>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                {/* ROI */}
-                <MaterialCommunityIcons name="chart-bell-curve" size={18} color="#f7b731" />
-                <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#f7b731', marginTop: 1 }}>{dashboardData.roi}%</Text>
-                <Text style={{ fontSize: 12, color: '#f7b731', marginTop: 1 }}>ROI</Text>
-              </View>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                {/* Growth */}
-                <MaterialCommunityIcons name="trending-up" size={18} color="#8854d0" />
-                <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#8854d0', marginTop: 1 }}>{dashboardData.capitalGrowth}%</Text>
-                <Text style={{ fontSize: 12, color: '#8854d0', marginTop: 1 }}>Growth</Text>
-              </View>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                {/* Portfolio LVR */}
-                <MaterialCommunityIcons name="percent" size={18} color="#fd9644" />
-                <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#fd9644', marginTop: 1 }}>{dashboardData.lvr}%</Text>
-                <Text style={{ fontSize: 12, color: '#fd9644', marginTop: 1 }}>Portfolio LVR</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ borderRadius: 999, backgroundColor: uiTheme.accentSoft, paddingHorizontal: 10, paddingVertical: 5, marginRight: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: uiTheme.accent }}>Overview</Text>
               </View>
             </View>
-            <View style={{ height: 2, backgroundColor: '#ccc', width: '100%', marginVertical: 10 }} />
-            {/* Portfolio Value Row */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 2 }}>
-              <MaterialCommunityIcons name="home-analytics" size={22} color="#4e8cff" style={{ marginRight: 10 }} />
-              <Text style={{ fontSize: 14, color: '#4e8cff', fontWeight: '600', flex: 1 }}>Fixed Assets</Text>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#4e8cff' }}>{formatCurrency(dashboardData.totalAssets)}</Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 2 }}>
-              <MaterialCommunityIcons name="cash-100" size={22} color="#4e8cff" style={{ marginRight: 10 }} />
-              <Text style={{ fontSize: 14, color: '#4e8cff', fontWeight: '600', flex: 1 }}>Current Assets</Text>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#4e8cff' }}>{formatCurrency(dashboardData.currentAssets)}</Text>
-            </View>
-            
-            {/* Total Debt Row */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 2 }}>
-              <MaterialCommunityIcons name="credit-card-outline" size={22} color="#eb3b5a" style={{ marginRight: 10 }} />
-              <Text style={{ fontSize: 14, color: '#eb3b5a', fontWeight: '600', flex: 1 }}>Liabilities</Text>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#eb3b5a' }}>{formatCurrency(dashboardData.totalLiabilities)}</Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 2 }}>
-              <MaterialCommunityIcons name="bank-outline" size={22} color="#20bf6b" style={{ marginRight: 10 }} />
-              <Text style={{ fontSize: 14, color: '#20bf6b', fontWeight: '600', flex: 1 }}>Net Worth</Text>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#20bf6b' }}>{formatCurrency((dashboardData.totalAssets + dashboardData.currentAssets) - dashboardData.totalLiabilities)}</Text>
-            </View>
-            {/* Equity Row */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 2 }}>
-              <MaterialCommunityIcons name="lock-open-outline" size={22} color="#006400" style={{ marginRight: 10 }} />
-              <Text style={{ fontSize: 14, color: 'darkgreen', fontWeight: '600', flex: 1 }}>Unlocked Equity</Text>
-              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#006400' }}>{formatCurrency(dashboardData.equity)}</Text>
-            </View>
-
           </View>
 
+          <View style={[styles.headerRow, { marginBottom: 14, marginTop: 4, paddingHorizontal: 8 }]}> 
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.headerText, { fontSize: 30, color: uiTheme.textPrimary, fontWeight: '800' }]}>Portfolio Overview</Text>
+              <Text style={{ fontSize: 13, color: uiTheme.textMuted, marginTop: 4 }}>Enterprise portfolio intelligence and performance tracking</Text>
+            </View>
+            <View style={{ borderWidth: 1, borderColor: webUi.shellInset, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#ffffff' }}>
+              <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>Live Snapshot</Text>
+            </View>
+          </View>
+        
+        {selectedEntity === 'all' && (
+          <View
+            style={[
+              styles.card,
+              {
+                ...sectionCardStyle,
+                paddingVertical: 18,
+                paddingHorizontal: 16,
+              },
+            ]}
+          >
+            <Text style={{ fontSize: 30, fontWeight: '800', color: uiTheme.textPrimary, marginBottom: 4 }}>
+              Portfolio Snapshot
+            </Text>
+            <Text style={{ fontSize: 13, color: uiTheme.textMuted, marginBottom: 16 }}>
+              Last updated: {lastUpdatedLabel}
+            </Text>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 }}>
+              {portfolioSummaryTiles.map((tile) => (
+                <View
+                  key={tile.key}
+                  style={{
+                    width: portfolioTileWidth,
+                    paddingHorizontal: 6,
+                    marginBottom: layoutRhythm.tileGap,
+                  }}
+                >
+                  <View
+                    style={{
+                      borderRadius: 10,
+                      backgroundColor: tile.backgroundColor,
+                      minHeight: 118,
+                      paddingVertical: 14,
+                      paddingHorizontal: 14,
+                      justifyContent: 'space-between',
+                      position: 'relative',
+                    }}
+                  >
+                    <View
+                      style={{
+                        position: 'absolute',
+                        right: 12,
+                        top: 12,
+                        width: tileIconSizing.summaryChip,
+                        height: tileIconSizing.summaryChip,
+                        borderRadius: tileIconSizing.summaryChip / 2,
+                        backgroundColor: semanticColors.iconChip,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <MaterialCommunityIcons name={tile.icon} size={tileIconSizing.summaryIcon} color={tile.iconColor} />
+                    </View>
+                    <Text style={{ fontSize: summaryValueFontSize, lineHeight: summaryValueFontSize + 2, fontWeight: '700', color: uiTheme.textPrimary }}>
+                      {tile.value}
+                    </Text>
+                    <Text style={{ fontSize: summaryLabelFontSize, lineHeight: summaryLabelFontSize + 4, color: uiTheme.textSecondary, marginTop: 10, fontWeight: '500' }}>
+                      {tile.label}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            <View style={{ height: 1, backgroundColor: uiTheme.divider, width: '100%', marginTop: 4, marginBottom: 12 }} />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 }}>
+              {portfolioIndicators.map((indicator) => (
+                <View
+                  key={indicator.key}
+                  style={{
+                    width: '33.33%',
+                    paddingHorizontal: 6,
+                    marginBottom: layoutRhythm.tileGap,
+                  }}
+                >
+                  <View
+                    style={{
+                      borderRadius: 10,
+                      backgroundColor: indicator.backgroundColor,
+                      paddingVertical: 11,
+                      paddingHorizontal: 12,
+                      paddingRight: 48,
+                      minHeight: 62,
+                      justifyContent: 'center',
+                      position: 'relative',
+                    }}
+                  >
+                    <View
+                      style={{
+                        position: 'absolute',
+                        right: 12,
+                        top: 14,
+                        width: tileIconSizing.indicatorChip,
+                        height: tileIconSizing.indicatorChip,
+                        borderRadius: tileIconSizing.indicatorChip / 2,
+                        backgroundColor: indicator.iconBg,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <MaterialCommunityIcons name={indicator.icon} size={tileIconSizing.indicatorIcon} color={indicator.color} />
+                    </View>
+                    <Text style={{ fontSize: 11, color: indicator.color, opacity: 0.88, fontWeight: '600' }}>
+                      {indicator.label}
+                    </Text>
+                    <Text style={{ fontSize: isCompactPortfolioCards ? 21 : 24, fontWeight: '800', color: indicator.color, marginTop: 2 }}>
+                      {indicator.value}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
         )}
         
         {/* Combined Chart Widget: Tabs for Distribution and Ownership */}
-        <View style={styles.chartCard}>
+        <View style={[styles.chartCard, { ...sectionCardStyle, paddingVertical: 14 }]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-            <View style={{ flexDirection: 'row', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#ddd' }}>
+            <View style={{ flexDirection: 'row', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: uiTheme.border }}>
               <TouchableOpacity
                 onPress={() => setChartTab('distribution')}
-                style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: chartTab === 'distribution' ? '#eafaf3' : '#fff' }}
+                style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: chartTab === 'distribution' ? uiTheme.accentSoft : uiTheme.surface }}
               >
-                <Text style={{ fontSize: 12, fontWeight: chartTab === 'distribution' ? '700' : '400', color: chartTab === 'distribution' ? '#2eaf7d' : '#444' }}>
+                <Text style={{ fontSize: 12, fontWeight: chartTab === 'distribution' ? '700' : '400', color: chartTab === 'distribution' ? uiTheme.accent : uiTheme.textSecondary }}>
                   Portfolio Distribution
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setChartTab('ownership')}
-                style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: chartTab === 'ownership' ? '#eafaf3' : '#fff' }}
+                style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: chartTab === 'ownership' ? uiTheme.accentSoft : uiTheme.surface }}
               >
-                <Text style={{ fontSize: 12, fontWeight: chartTab === 'ownership' ? '700' : '400', color: chartTab === 'ownership' ? '#2eaf7d' : '#444' }}>
+                <Text style={{ fontSize: 12, fontWeight: chartTab === 'ownership' ? '700' : '400', color: chartTab === 'ownership' ? uiTheme.accent : uiTheme.textSecondary }}>
                   Portfolio Ownership
                 </Text>
               </TouchableOpacity>
@@ -830,7 +1228,7 @@ export default function DashboardScreen() {
             barChartValues.length > 0 ? (
               <>
                 {/* Single horizontal stacked bar */}
-                <View style={{ flexDirection: 'row', width: '100%', height: 28, borderRadius: 10, overflow: 'hidden', backgroundColor: '#eafaf3', marginBottom: 18 }}>
+                <View style={{ flexDirection: 'row', width: '100%', height: 28, borderRadius: 10, overflow: 'hidden', backgroundColor: uiTheme.accentSoft, marginBottom: 18 }}>
                   {filteredBarData.map((item, idx) => {
                     const percent =
                       barChartValues.reduce((a, b) => a + b, 0) > 0
@@ -858,7 +1256,7 @@ export default function DashboardScreen() {
                       style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, marginBottom: 8 }}
                     >
                       <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: chartColors[idx % chartColors.length], marginRight: 6 }} />
-                      <Text style={{ fontSize: 13, color: '#444' }} numberOfLines={1} ellipsizeMode="tail">
+                      <Text style={{ fontSize: 13, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
                         {item.propertyAddress} - {formatCurrency(item.value)}
                       </Text>
                     </View>
@@ -878,7 +1276,7 @@ export default function DashboardScreen() {
               ) : pieChartData.length > 0 ? (
                 <>
                   {/* Single horizontal stacked bar for ownership split */}
-                  <View style={{ flexDirection: 'row', width: '100%', height: 28, borderRadius: 10, overflow: 'hidden', backgroundColor: '#eafaf3', marginBottom: 18 }}>
+                  <View style={{ flexDirection: 'row', width: '100%', height: 28, borderRadius: 10, overflow: 'hidden', backgroundColor: uiTheme.accentSoft, marginBottom: 18 }}>
                     {pieData.map((item, idx) => (
                       <View
                         key={item.key}
@@ -906,7 +1304,7 @@ export default function DashboardScreen() {
                         style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, marginBottom: 8 }}
                       >
                         <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: chartColors[idx % chartColors.length], marginRight: 6 }} />
-                        <Text style={{ fontSize: 13, color: '#444' }} numberOfLines={1} ellipsizeMode="tail">
+                        <Text style={{ fontSize: 13, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
                           {item.label} - {item.percent}%
                         </Text>
                       </View>
@@ -920,176 +1318,329 @@ export default function DashboardScreen() {
           )}
         </View>
 
-        {/* Top Properties */}
-        {propertyScores && propertyScores.length > 0 && (
-          <View style={[styles.card, { paddingVertical: 12 }]}> 
-            <Text style={[styles.label, { marginBottom: 8 }]}>Top Performers</Text>
-            {/* Top 3 properties by score only if score >= 70 */}
-            {propertyScores
-              .filter((ps) => ps.score >= 70)
-              .slice()
-              .sort((a, b) => b.score - a.score)
-              .slice(0, 3)
-              .map((ps) => (
-                <View key={`top-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                  <MaterialCommunityIcons name="star" size={18} color="#f7b731" style={{ marginRight: 8 }} />
-                  <Text style={{ flex: 1, fontSize: 13, color: '#444' }} numberOfLines={1} ellipsizeMode="tail">
-                    {ps.address}
-                  </Text>
-                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: getScoreColor(ps.score) }}>{Math.round(ps.score)}/100</Text>
-                </View>
-              ))}
-          </View>
-        )}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: 2 }}>
+            <View style={{ width: '31%', paddingRight: 7 }}>
+              <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14, marginBottom: layoutRhythm.sectionGap }]}> 
+                <Text style={[styles.label, { marginBottom: 6 }]}>Recent Transactions</Text>
+                {renderRecentTransactionsTimeline('recent-web')}
+              </View>
 
-        {/* Property Scores */}
-        {propertyScores && propertyScores.length > 0 && (
-          <View style={[styles.card, { paddingVertical: 12 }]}> 
-            <Text style={[styles.label, { marginBottom: 8 }]}>Property Scores</Text>
-            {propertyScores
-              .slice()
-              .sort((a, b) => b.score - a.score)
-              .map((ps) => (
-              <View key={ps.propertyId} style={{ marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                  <MaterialCommunityIcons name={ps.tag === 'SOLD' ? 'sale' : 'home'} size={18} color={ps.tag === 'SOLD' ? '#c0392b' : '#2eaf7d'} style={{ marginRight: 8 }} />
-                  <Text style={{ flex: 1, fontSize: 13, color: '#444' }} numberOfLines={1} ellipsizeMode="tail">
-                    {ps.address}
-                  </Text>
-                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: getScoreColor(ps.score), marginRight: 8 }}>{Math.round(ps.score)}/100</Text>
-                  <TouchableOpacity onPress={() => { setSelectedScore(ps); setBreakdownModalVisible(true); }}>
-                    <Text style={{ fontSize: 12, color: '#4e8cff' }}>Details</Text>
-                  </TouchableOpacity>
+              <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14, marginBottom: layoutRhythm.sectionGap }]}> 
+                <Text style={[styles.label, { marginBottom: 6 }]}>Portfolio Performance Scoring</Text>
+                <Text style={{ fontSize: 12, color: uiTheme.textMuted, marginBottom: 10 }}>Coming soon</Text>
+                <View style={{ borderRadius: 10, borderWidth: 1, borderColor: uiTheme.divider, backgroundColor: uiTheme.surfaceSoft, padding: 10 }}>
+                  <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>Weighted portfolio scorecard and trend benchmarks will appear here.</Text>
                 </View>
-                <View style={{ width: '100%', height: 10, borderRadius: 6, backgroundColor: '#eafaf3', overflow: 'hidden' }}>
-                  <View style={{ width: `${clampWidth(ps.score)}%`, height: '100%', backgroundColor: getScoreColor(ps.score) }} />
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                  <Text style={{ fontSize: 11, color: '#777' }}>Growth: {Number.isFinite(ps.growthPct) ? ps.growthPct.toFixed(1) + '%' : '—'}</Text>
-                  <Text style={{ fontSize: 11, color: '#777' }}>ROI: {Number.isFinite(ps.roiPct) ? ps.roiPct.toFixed(1) + '%' : '—'}</Text>
-                  <Text style={{ fontSize: 11, color: '#777' }}>Cashflow: {Number.isFinite(ps.cashflowYieldPct) ? ps.cashflowYieldPct.toFixed(1) + '%' : '—'}</Text>
-                  <Text style={{ fontSize: 11, color: '#777' }}>P&L: {Number.isFinite(ps.pl) ? '$' + ps.pl.toFixed(2) : '—'}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Low Performers */}
-        {propertyScores && propertyScores.some((ps) => ps.score < 50) && (
-          <View style={[styles.card, { paddingVertical: 12 }]}> 
-            <Text style={[styles.label, { marginBottom: 8 }]}>Low Performers</Text>
-            {propertyScores
-              .filter((ps) => ps.score < 50)
-              .sort((a, b) => a.score - b.score)
-              .slice(0, 3)
-              .map((ps) => (
-                <View key={`low-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                  <MaterialCommunityIcons name="alert" size={18} color="#eb3b5a" style={{ marginRight: 8 }} />
-                  <Text style={{ flex: 1, fontSize: 13, color: '#444' }} numberOfLines={1} ellipsizeMode="tail">{ps.address}</Text>
-                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#eb3b5a' }}>{Math.round(ps.score)}/100</Text>
-                </View>
-              ))}
-          </View>
-        )}
-
-        {selectedEntity === 'all' && summaryMetrics && (
-          <View style={[
-            styles.card,
-            {
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingVertical: 6
-            }
-          ]}
-          >
-            <TouchableOpacity
-              onPress={() => setIsFinancialSummaryExpanded((prev) => !prev)}
-              style={{ width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, marginBottom: 4 }}
-            >
-              <Text style={[styles.label]}>Financial Summary</Text>
-              <Text style={[styles.label]}>{isFinancialSummaryExpanded ? 'X' : 'Open'}</Text>
-              
-            </TouchableOpacity>
-            {/* Individual summary metric rows */}
-            {isFinancialSummaryExpanded && (
-            <View style={{ width: '100%', marginTop: 8 }}>
-              {/* Total Invested */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="cash-plus" size={20} color="#f7b731" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>Total Invested (Out of Pocket)</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#f7b731' }}>{formatCurrency(summaryMetrics.overallOutOfPocket)}</Text>
-              </View>
-              {/* Rental Income */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="cash-100" size={20} color="#20bf6b" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>Rental Income</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#20bf6b' }}>{formatCurrency(summaryMetrics.overallIncome)}</Text>
-              </View>
-              {/* Sale Proceeds */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="sale" size={20} color="#197d32" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>Sale Proceeds</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#197d32' }}>{formatCurrency(summaryMetrics.saleProceeds)}</Text>
-              </View>
-              
-              {/* Gross Expense */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="file-percent" size={20} color="#eb3b5a" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>Total Expenses</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#eb3b5a' }}>{formatCurrency(summaryMetrics.overallTaxDeductibleExpenses)}</Text>
-              </View>
-              {/* Mortgage Paid */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="home-group" size={20} color="#8854d0" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>Principal Paid</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#8854d0' }}>{formatCurrency(summaryMetrics.overallMortgagePayments)}</Text>
-              </View>
-              {/* Interest Paid */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="currency-usd-off" size={20} color="#fd9644" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>Interest Paid</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#fd9644' }}>{formatCurrency(summaryMetrics.overallInterest)}</Text>
-              </View>
-              {/* Cashflow */}
-              {/* Profit & Loss (Excl. Tax Savings)*/}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="chart-bar" size={20} color="#2eaf7d" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>Profit & Loss</Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#2eaf7d' }}>{formatCurrency(summaryMetrics.overallPL)}</Text>
-              </View>
-              {/* Est. Tax Savings */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <MaterialCommunityIcons name="bank-check" size={20} color="#1976d2" style={{ marginRight: 10 }} />
-                <Text style={{ fontSize: 14, color: '#444', flex: 1 }}>
-                  Est. Tax Savings
-                  <Text style={{ fontSize: 10, lineHeight: 14, verticalAlign: 'top' }}>*</Text>
-                </Text>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#1976d2' }}>{formatCurrency(summaryMetrics.taxSavings)}</Text>
               </View>
             </View>
-            )}
+
+            <View style={{ width: '69%', paddingLeft: 7 }}>
+              {selectedEntity === 'all' && summaryMetrics && (
+                <View style={[
+                  styles.card,
+                  {
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    paddingVertical: 8,
+                    ...sectionCardStyle,
+                  }
+                ]}
+                >
+                  <View style={{ width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, marginBottom: 4 }}>
+                    <Text style={[styles.label]}>Financial Summary</Text>
+                  </View>
+                  <View style={{ width: '100%', marginTop: 8 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 }}>
+                      {[
+                        {
+                          key: 'invested',
+                          icon: 'cash-plus' as const,
+                          color: semanticColors.roi,
+                          label: 'Total Invested (Out of Pocket)',
+                          value: formatCurrency(summaryMetrics.overallOutOfPocket),
+                        },
+                        {
+                          key: 'income',
+                          icon: 'cash-100' as const,
+                          color: semanticColors.success,
+                          label: 'Rental Income',
+                          value: formatCurrency(summaryMetrics.overallIncome),
+                        },
+                        {
+                          key: 'sale',
+                          icon: 'sale' as const,
+                          color: semanticColors.success,
+                          label: 'Sale Proceeds',
+                          value: formatCurrency(summaryMetrics.saleProceeds),
+                        },
+                        {
+                          key: 'expense',
+                          icon: 'file-percent' as const,
+                          color: uiTheme.danger,
+                          label: 'Total Expenses',
+                          value: formatCurrency(summaryMetrics.overallTaxDeductibleExpenses),
+                        },
+                        {
+                          key: 'principal',
+                          icon: 'home-group' as const,
+                          color: semanticColors.violet,
+                          label: 'Principal Paid',
+                          value: formatCurrency(summaryMetrics.overallMortgagePayments),
+                        },
+                        {
+                          key: 'interest',
+                          icon: 'currency-usd-off' as const,
+                          color: uiTheme.warning,
+                          label: 'Interest Paid',
+                          value: formatCurrency(summaryMetrics.overallInterest),
+                        },
+                        {
+                          key: 'pl',
+                          icon: 'chart-bar' as const,
+                          color: uiTheme.accent,
+                          label: 'Profit & Loss',
+                          value: formatCurrency(summaryMetrics.overallPL),
+                        },
+                        {
+                          key: 'tax',
+                          icon: 'bank-check' as const,
+                          color: semanticColors.info,
+                          label: 'Est. Tax Savings*',
+                          value: formatCurrency(summaryMetrics.taxSavings),
+                        },
+                      ].map((item) => (
+                        <View
+                          key={item.key}
+                          style={{
+                            width: isCompactPortfolioCards ? '50%' : '25%',
+                            paddingHorizontal: 4,
+                            marginBottom: 8,
+                          }}
+                        >
+                          <View
+                            style={{
+                              backgroundColor: uiTheme.surfaceSoft,
+                              borderRadius: uiTheme.radiusItem,
+                              borderWidth: 1,
+                              borderColor: uiTheme.border,
+                              minHeight: 84,
+                              paddingVertical: 10,
+                              paddingHorizontal: 10,
+                              paddingRight: tileIconSizing.financialChip + tileIconSizing.financialIconRight + 6,
+                              justifyContent: 'space-between',
+                              position: 'relative',
+                            }}
+                          >
+                            <View
+                              style={{
+                                position: 'absolute',
+                                right: tileIconSizing.financialIconRight,
+                                top: tileIconSizing.financialIconTop,
+                                width: tileIconSizing.financialChip,
+                                height: tileIconSizing.financialChip,
+                                borderRadius: tileIconSizing.financialChip / 2,
+                                backgroundColor: semanticColors.iconChip,
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              <MaterialCommunityIcons name={item.icon} size={tileIconSizing.financialIcon} color={item.color} />
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 9, color: uiTheme.textMuted, flex: 1, fontWeight: '500' }} numberOfLines={2}>{item.label}</Text>
+                            </View>
+                            <Text style={{ fontSize: isCompactPortfolioCards ? 20 : 24, fontWeight: '800', color: item.color, marginTop: 4 }} numberOfLines={1}>{item.value}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Property Scores + Performer Bands */}
+              {propertyScores && propertyScores.length > 0 && (
+                <View style={{ flexDirection: scoringDualPane ? 'row' : 'column', alignItems: 'stretch' }}>
+                  <View style={{ width: scoringDualPane ? '68%' : '100%', paddingRight: scoringDualPane ? 7 : 0 }}>
+                    <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14 }]}> 
+                      <Text style={[styles.label, { marginBottom: 8 }]}>Property Scores</Text>
+                      {propertyScores
+                        .slice()
+                        .sort((a, b) => b.score - a.score)
+                        .map((ps) => {
+                        const isScoreExpanded = !!expandedPropertyScores[String(ps.propertyId)];
+                        return (
+                        <View
+                          key={ps.propertyId}
+                          style={{
+                            marginBottom: 12,
+                            backgroundColor: uiTheme.surfaceSoft,
+                            borderRadius: uiTheme.radiusItem,
+                            borderWidth: 1,
+                            borderColor: uiTheme.border,
+                            paddingVertical: 12,
+                            paddingHorizontal: 12,
+                            paddingRight: 50,
+                            position: 'relative',
+                          }}
+                        >
+                          <View
+                            style={{
+                              position: 'absolute',
+                              right: 10,
+                              top: 10,
+                              width: tileIconSizing.scoreBadge,
+                              height: tileIconSizing.scoreBadge,
+                              borderRadius: tileIconSizing.scoreBadge / 2,
+                              backgroundColor: getScoreColor(ps.score),
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <TouchableOpacity
+                              onPress={() => { setSelectedScore(ps); setBreakdownModalVisible(true); }}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Text style={{ fontSize: tileIconSizing.scoreBadgeText, fontWeight: '800', color: '#fff' }}>{Math.round(ps.score)}</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                            <MaterialCommunityIcons
+                              name={ps.tag === 'SOLD' ? 'sale' : 'home'}
+                              size={tileIconSizing.propertyHeaderIcon}
+                              color={ps.tag === 'SOLD' ? '#c0392b' : uiTheme.accent}
+                              style={{ marginRight: 8 }}
+                            />
+                            <Text style={{ flex: 1, fontSize: 13, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
+                              {ps.address}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => togglePropertyScoreAccordion(ps.propertyId)}
+                              style={{ paddingHorizontal: 6, paddingVertical: 4, marginRight: 22 }}
+                            >
+                              <MaterialCommunityIcons
+                                name={isScoreExpanded ? 'chevron-up' : 'chevron-down'}
+                                size={18}
+                                color={uiTheme.textMuted}
+                              />
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={{ width: '100%', height: 8, borderRadius: 6, backgroundColor: uiTheme.accentSoft, overflow: 'hidden', marginBottom: 8 }}>
+                            <View style={{ width: `${clampWidth(ps.score)}%`, height: '100%', backgroundColor: getScoreColor(ps.score) }} />
+                          </View>
+
+                          {isScoreExpanded && (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 }}>
+                            {[
+                              { key: 'growth', label: 'Growth', icon: 'trending-up' as const, value: Number.isFinite(ps.growthPct) ? ps.growthPct.toFixed(1) + '%' : '—' },
+                              { key: 'roi', label: 'ROI', icon: 'chart-line' as const, value: Number.isFinite(ps.roiPct) ? ps.roiPct.toFixed(1) + '%' : '—' },
+                              { key: 'cashflow', label: 'Cashflow', icon: 'cash' as const, value: Number.isFinite(ps.cashflowYieldPct) ? ps.cashflowYieldPct.toFixed(1) + '%' : '—' },
+                              { key: 'pl', label: 'P&L', icon: 'finance' as const, value: Number.isFinite(ps.pl) ? '$' + ps.pl.toFixed(2) : '—' },
+                            ].map((metric) => (
+                              <View key={metric.key} style={{ width: '50%', paddingHorizontal: 4, marginBottom: 4 }}>
+                                <View style={{ position: 'relative', paddingRight: tileIconSizing.propertyMetricPaddingRight }}>
+                                  <View
+                                    style={{
+                                      position: 'absolute',
+                                      right: tileIconSizing.propertyMetricIconRight,
+                                      top: tileIconSizing.propertyMetricIconTop,
+                                      width: tileIconSizing.propertyMetricChip,
+                                      height: tileIconSizing.propertyMetricChip,
+                                      borderRadius: tileIconSizing.propertyMetricChip / 2,
+                                      backgroundColor: semanticColors.iconChip,
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}
+                                  >
+                                    <MaterialCommunityIcons name={metric.icon} size={tileIconSizing.propertyMetricIcon} color={uiTheme.textMuted} />
+                                  </View>
+                                  <Text style={{ fontSize: 10, color: uiTheme.textMuted }}>{metric.label}</Text>
+                                  <Text style={{ fontSize: 12, fontWeight: '700', color: uiTheme.textSecondary, marginTop: 1 }}>{metric.value}</Text>
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                          )}
+                        </View>
+                      )})}
+                    </View>
+                  </View>
+
+                  <View style={{ width: scoringDualPane ? '32%' : '100%', paddingLeft: scoringDualPane ? 7 : 0 }}>
+                    <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14 }]}> 
+                      <Text style={[styles.label, { marginBottom: 8 }]}>Performer Bands</Text>
+
+                      <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 6 }}>Top Performers</Text>
+                      {propertyScores
+                        .filter((ps) => ps.score >= 70)
+                        .slice()
+                        .sort((a, b) => b.score - a.score)
+                        .slice(0, 3)
+                        .map((ps) => (
+                          <View key={`top-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                            <MaterialCommunityIcons name="star" size={17} color="#f4c430" style={{ marginRight: 8 }} />
+                            <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
+                              {ps.address}
+                            </Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: getScoreColor(ps.score) }}>{Math.round(ps.score)}</Text>
+                          </View>
+                        ))}
+                      {!propertyScores.some((ps) => ps.score >= 70) && (
+                        <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 8 }}>No high performers yet.</Text>
+                      )}
+
+                      <View style={{ height: 1, backgroundColor: uiTheme.divider, marginVertical: 8 }} />
+
+                      <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 6 }}>Low Performers</Text>
+                      {propertyScores
+                        .filter((ps) => ps.score < 50)
+                        .sort((a, b) => a.score - b.score)
+                        .slice(0, 3)
+                        .map((ps) => (
+                          <View key={`low-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                            <MaterialCommunityIcons name="alert" size={17} color={uiTheme.danger} style={{ marginRight: 8 }} />
+                            <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">{ps.address}</Text>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: uiTheme.danger }}>{Math.round(ps.score)}</Text>
+                          </View>
+                        ))}
+                      {!propertyScores.some((ps) => ps.score < 50) && (
+                        <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>No low performers.</Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              )}
+            </View>
           </View>
-        )}
+
+
+        </View>
 
       </View>
       {/* Breakdown Modal */}
       <Modal visible={breakdownModalVisible} animationType="slide" transparent onRequestClose={() => setBreakdownModalVisible(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 20 }}>
-          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 16 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 6 }}>Score Breakdown</Text>
+        <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.35)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: uiTheme.surface, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: uiTheme.border }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 6, color: uiTheme.textPrimary }}>Score Breakdown</Text>
             {selectedScore ? (
               <View>
-                <Text style={{ fontSize: 13, color: '#444', marginBottom: 8 }}>{selectedScore.address}</Text>
+                <Text style={{ fontSize: 13, color: uiTheme.textSecondary, marginBottom: 8 }}>{selectedScore.address}</Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 12, color: '#777' }}>Total Score</Text>
+                  <Text style={{ fontSize: 12, color: uiTheme.textMuted }}>Total Score</Text>
                   <Text style={{ fontSize: 12, fontWeight: '600', color: getScoreColor(selectedScore.score) }}>{Math.round(selectedScore.score)}/100</Text>
                 </View>
-                <View style={{ height: 8, borderRadius: 6, backgroundColor: '#eafaf3', overflow: 'hidden', marginBottom: 10 }}>
+                <View style={{ height: 8, borderRadius: 6, backgroundColor: uiTheme.accentSoft, overflow: 'hidden', marginBottom: 10 }}>
                   <View style={{ width: `${clampWidth(selectedScore.score)}%`, height: '100%', backgroundColor: getScoreColor(selectedScore.score) }} />
                 </View>
                 {/* Contributions */}
-                <Text style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>Metric contributions (weighted):</Text>
+                <Text style={{ fontSize: 12, color: uiTheme.textSecondary, marginBottom: 6 }}>Metric contributions (weighted):</Text>
                 <View style={{ marginBottom: 8 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Text style={{ fontSize: 12 }}>Growth</Text>
@@ -1109,7 +1660,7 @@ export default function DashboardScreen() {
                   </View>
                 </View>
                 {/* Raw metrics */}
-                <Text style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>Raw metrics:</Text>
+                <Text style={{ fontSize: 12, color: uiTheme.textSecondary, marginBottom: 6 }}>Raw metrics:</Text>
                 <View style={{ marginBottom: 8 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Text style={{ fontSize: 12 }}>Growth</Text>
@@ -1129,7 +1680,7 @@ export default function DashboardScreen() {
                   </View>
                 </View>
                 {/* Raw metrics */}
-                <Text style={{ fontSize: 12, color: '#555', marginBottom: 6 }}>Assessment Range & Weight</Text>
+                <Text style={{ fontSize: 12, color: uiTheme.textSecondary, marginBottom: 6 }}>Assessment Range & Weight</Text>
                 <View style={{ marginBottom: 8 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                     <Text style={{ fontSize: 12 }}>Growth</Text>
@@ -1152,13 +1703,13 @@ export default function DashboardScreen() {
                   </View>
                 </View>
                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-                  <TouchableOpacity onPress={() => setBreakdownModalVisible(false)} style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#eafaf3', borderRadius: 8 }}>
-                    <Text style={{ color: '#2eaf7d', fontWeight: '600' }}>Close</Text>
+                  <TouchableOpacity onPress={() => setBreakdownModalVisible(false)} style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: uiTheme.accentSoft, borderRadius: 8 }}>
+                    <Text style={{ color: uiTheme.accent, fontWeight: '600' }}>Close</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             ) : (
-              <Text style={{ fontSize: 12, color: '#777' }}>No property selected.</Text>
+              <Text style={{ fontSize: 12, color: uiTheme.textMuted }}>No property selected.</Text>
             )}
           </View>
         </View>

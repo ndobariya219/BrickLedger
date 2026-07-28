@@ -11,10 +11,7 @@ export async function fetchUserMortgageAccounts(userId: string) {
     .from('accounts')
     .select('balance, property_id')
     .eq('user_id', userId)
-    .eq('type', 'mortgage')
-    // Only fetch active and current mortgages - this assumes that a mortgage account has a start_date and end_date, and active mortgages have start_date in the past and (end_date in the future or null)
-    .lte('start_date', new Date().toISOString()) // Only fetch active mortgages
-    .or(`end_date.gte.${new Date().toISOString()},end_date.is.null`);
+    .eq('type', 'mortgage');
 }
 
 export async function fetchMortgagesByPropertyIds(propertyIds: string[]) {
@@ -25,9 +22,6 @@ export async function fetchMortgagesByPropertyIds(propertyIds: string[]) {
     .from('accounts')
     .select('balance, property_id, institution')
     .eq('type', 'mortgage')
-    // Only fetch active and current mortgages - this assumes that a mortgage account has a start_date and end_date, and active mortgages have start_date in the past and (end_date in the future or null)
-    .lte('start_date', new Date().toISOString()) // Only fetch active mortgages
-    .or(`end_date.gte.${new Date().toISOString()},end_date.is.null`)
     .in('property_id', propertyIds);
 }
 

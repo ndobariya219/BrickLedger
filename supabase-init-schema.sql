@@ -77,8 +77,6 @@ DO $$ BEGIN
       balance numeric DEFAULT 0,
       currency text DEFAULT 'AUD'::text,
       interest_rate double precision,
-      start_date timestamp with time zone,
-      end_date timestamp with time zone,
       offset_account_id bigint,
       property_id integer,
       institution text,
