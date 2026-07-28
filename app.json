@@ -37,8 +37,7 @@
       "expo-router"
     ],
     "experiments": {
-      "typedRoutes": true,
-      "baseUrl": "/BrickLedger"
+      "typedRoutes": true
     },
     "extra": {
       "router": {},
