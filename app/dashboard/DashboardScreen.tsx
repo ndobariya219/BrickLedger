@@ -233,22 +233,6 @@ export default function DashboardScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEntity, properties, mortgages, accounts]);
 
-  // Format property addresses for better readability (multi-line or truncated)
-  const formatAddress = (address: string) => {
-    if (!address) return '';
-    // Split by comma, show street and suburb/city on two lines if possible
-    const parts = address.split(' ');
-    if (parts.length > 1) {
-      // Show street on first line, suburb/city on second line (trimmed)
-      return `${parts[0].trim()}\r${parts[1].trim()}`;
-    }
-    // Truncate if too long, but keep at least 2 lines if possible
-    if (address.length > 18) {
-      return address.slice(0, 15) + '...';
-    }
-    return address;
-  };
-
   // Calculate entity ownership by value for pie chart
   const entityValueMap: { [entityId: string]: { name: string; value: number } } = {};
   let totalPortfolioValue = 0;
@@ -321,21 +305,27 @@ export default function DashboardScreen() {
   );
   // Bar chart data for react-native-chart-kit
   const filteredBarData = barData.filter((item) => item !== null);
-  const barChartLabels = filteredBarData.map((item) => formatAddress(item.propertyAddress));
   const barChartValues = filteredBarData.map((item) => item.value);
+  const distributionTotal = barChartValues.reduce((sum, value) => sum + value, 0);
+  const distributionLegend = filteredBarData.map((item, idx) => {
+    const percent = distributionTotal > 0 ? (item.value / distributionTotal) * 100 : 0;
+    return {
+      key: `${item.propertyAddress}-${idx}`,
+      color: chartColors[idx % chartColors.length],
+      label: item.propertyAddress,
+      value: item.value,
+      percent,
+    };
+  });
 
-  // Pie chart data for react-native-chart-kit
-  // Show legend as 'entityName - %allocation' (no value at start)
-  const pieChartData = pieData.map((item, idx) => ({
-    name: `${item.label} - ${item.percent}%`,
-    population: item.value,
+  const ownershipLegend = pieData.map((item, idx) => ({
+    key: item.key,
     color: chartColors[idx % chartColors.length],
-    legendFontColor: '#444',
-    legendFontSize: 13,
+    label: item.label,
+    value: item.value,
+    percent: Number(item.percent) || 0,
   }));
-
-  // Chart dimensions
-  const screenWidth = Dimensions.get('window').width - 40; // padding
+  const topOwnership = ownershipLegend.slice().sort((a, b) => b.percent - a.percent)[0];
 
   const calculateDashboard = (properties: any[], mortgages: any[], accounts: any[]) => {
     // Exclude sold properties
@@ -477,8 +467,6 @@ export default function DashboardScreen() {
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [breakdownModalVisible, setBreakdownModalVisible] = useState(false);
   const [selectedScore, setSelectedScore] = useState<any | null>(null);
-  const [chartTab, setChartTab] = useState<'distribution' | 'ownership'>('distribution');
-  const [expandedPropertyScores, setExpandedPropertyScores] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     Logger.info('useEffect: properties/accounts/mortgages/weights changed (summary metrics)', { properties, soldProperties, accounts, mortgages, weights }, 'DashboardScreen.tsx');
@@ -518,7 +506,7 @@ export default function DashboardScreen() {
           const bTs = new Date(b?.date || 0).getTime();
           return bTs - aTs;
         })
-        .slice(0, 5);
+        .slice(0, 10);
       setRecentTransactions(latestFiveTransactions);
 
       // Aggregate using correct type values
@@ -832,7 +820,7 @@ export default function DashboardScreen() {
   const portfolioTilesPerRow = windowWidth >= 1100 ? 6 : windowWidth >= 760 ? 3 : 2;
   const summaryValueFontSize = windowWidth >= 1200 ? 44 : windowWidth >= 900 ? 38 : 32;
   const summaryLabelFontSize = windowWidth >= 1200 ? 13 : 12;
-  const scoringDualPane = windowWidth >= 1220;
+  const isChartsDualPane = windowWidth >= 1080;
   const layoutRhythm = {
     sectionGap: 14,
     tileGap: 12,
@@ -1015,10 +1003,12 @@ export default function DashboardScreen() {
     return uiTheme.accent;
   };
 
-  const togglePropertyScoreAccordion = (propertyId: string | number) => {
-    const key = String(propertyId);
-    setExpandedPropertyScores((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+  const rankedPropertyScores = (propertyScores || []).slice().sort((a, b) => b.score - a.score);
+  const topPerformerScores = rankedPropertyScores.filter(p => p.score > 90).slice(0, 3);
+  const remainingAfterTopScores = rankedPropertyScores.slice(3);
+  const lowPerformerScores = remainingAfterTopScores.filter(p => p.score < 60).slice().sort((a, b) => a.score - b.score).slice(0, 2);
+  const lowPerformerIds = new Set(lowPerformerScores.map((ps) => String(ps.propertyId)));
+  const stablePerformerScores = remainingAfterTopScores.filter((ps) => !lowPerformerIds.has(String(ps.propertyId)));
 
   // Weight controls moved to UserAccountScreen
 
@@ -1201,140 +1191,125 @@ export default function DashboardScreen() {
           </View>
         )}
         
-        {/* Combined Chart Widget: Tabs for Distribution and Ownership */}
-        <View style={[styles.chartCard, { ...sectionCardStyle, paddingVertical: 14 }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-            <View style={{ flexDirection: 'row', borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: uiTheme.border }}>
-              <TouchableOpacity
-                onPress={() => setChartTab('distribution')}
-                style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: chartTab === 'distribution' ? uiTheme.accentSoft : uiTheme.surface }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: chartTab === 'distribution' ? '700' : '400', color: chartTab === 'distribution' ? uiTheme.accent : uiTheme.textSecondary }}>
-                  Portfolio Distribution
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setChartTab('ownership')}
-                style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: chartTab === 'ownership' ? uiTheme.accentSoft : uiTheme.surface }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: chartTab === 'ownership' ? '700' : '400', color: chartTab === 'ownership' ? uiTheme.accent : uiTheme.textSecondary }}>
-                  Portfolio Ownership
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+        <View style={{ flexDirection: isChartsDualPane ? 'row' : 'column', alignItems: 'stretch', marginBottom: layoutRhythm.sectionGap }}>
+          <View style={{ width: isChartsDualPane ? '50%' : '100%', paddingRight: isChartsDualPane ? 7 : 0, marginBottom: isChartsDualPane ? 0 : layoutRhythm.sectionGap }}>
+            <View style={[styles.chartCard, { ...sectionCardStyle, paddingVertical: 14, height: '100%' }]}> 
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: semanticColors.infoSoft, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+                    <MaterialCommunityIcons name="chart-timeline-variant" size={16} color={semanticColors.info} />
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: uiTheme.textPrimary }}>Portfolio Distribution</Text>
+                    <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginLeft: 8 }}>Value split by property</Text>
+                  </View>
+                </View>
+              </View>
 
-          {chartTab === 'distribution' ? (
-            barChartValues.length > 0 ? (
-              <>
-                {/* Single horizontal stacked bar */}
-                <View style={{ flexDirection: 'row', width: '100%', height: 28, borderRadius: 10, overflow: 'hidden', backgroundColor: uiTheme.accentSoft, marginBottom: 18 }}>
-                  {filteredBarData.map((item, idx) => {
-                    const percent =
-                      barChartValues.reduce((a, b) => a + b, 0) > 0
-                        ? (item.value / barChartValues.reduce((a, b) => a + b, 0)) * 100
-                        : 0;
-                    return (
-                      <View
-                        key={idx}
-                        style={{ flex: percent, height: '100%', backgroundColor: chartColors[idx % chartColors.length], justifyContent: 'center', alignItems: 'center' }}
-                      >
-                        {percent > 10 && (
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>
-                            {percent.toFixed(2)}%
-                          </Text>
-                        )}
-                      </View>
-                    );
-                  })}
-                </View>
-                {/* Legend below the bar */}
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 6 }}>
-                  {filteredBarData.map((item, idx) => (
-                    <View
-                      key={idx}
-                      style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, marginBottom: 8 }}
-                    >
-                      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: chartColors[idx % chartColors.length], marginRight: 6 }} />
-                      <Text style={{ fontSize: 13, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
-                        {item.propertyAddress} - {formatCurrency(item.value)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </>
-            ) : (
-              <Text style={styles.noChartData}>No property data</Text>
-            )
-          ) : (
-            // Ownership tab
-            selectedEntity !== 'all' ? (
-              <Text style={styles.noChartData}>Switch to 'All' to view ownership split</Text>
-            ) : (
-              loading ? (
-                <ActivityIndicator size="large" color="#2eaf7d" style={{ marginVertical: 24 }} />
-              ) : pieChartData.length > 0 ? (
+              {distributionLegend.length > 0 ? (
                 <>
-                  {/* Single horizontal stacked bar for ownership split */}
-                  <View style={{ flexDirection: 'row', width: '100%', height: 28, borderRadius: 10, overflow: 'hidden', backgroundColor: uiTheme.accentSoft, marginBottom: 18 }}>
-                    {pieData.map((item, idx) => (
+                  <View style={{ flexDirection: 'row', width: '100%', height: 30, borderRadius: 10, overflow: 'hidden', backgroundColor: uiTheme.accentSoft, marginBottom: 12 }}>
+                    {distributionLegend.map((item) => (
                       <View
                         key={item.key}
-                        style={{
-                          flex: parseFloat(item.percent),
-                          height: '100%',
-                          backgroundColor: chartColors[idx % chartColors.length],
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                        }}
+                        style={{ flex: item.percent, height: '100%', backgroundColor: item.color, justifyContent: 'center', alignItems: 'center' }}
                       >
-                        {parseFloat(item.percent) > 10 && (
-                          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>
-                            {item.percent}%
+                        {item.percent >= 12 && (
+                          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
+                            {item.percent.toFixed(1)}%
                           </Text>
                         )}
                       </View>
                     ))}
                   </View>
-                  {/* Legend below the bar */}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 6 }}>
-                    {pieData.map((item, idx) => (
+
+                  <View style={{ borderWidth: 1, borderColor: uiTheme.divider, borderRadius: 10, overflow: 'hidden' }}>
+                    {distributionLegend.map((item, idx) => (
+                      <View key={`${item.key}-legend`} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, borderBottomWidth: idx === distributionLegend.length - 1 ? 0 : 1, borderBottomColor: uiTheme.divider, backgroundColor: idx % 2 === 0 ? '#ffffff' : uiTheme.surfaceSoft }}>
+                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: item.color, marginRight: 8 }} />
+                        <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1}>
+                          {item.label}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: uiTheme.textMuted, width: 54, textAlign: 'right' }}>{item.percent.toFixed(1)}%</Text>
+                        <Text style={{ fontSize: 11, color: uiTheme.textPrimary, fontWeight: '700', width: 96, textAlign: 'right' }}>{formatCurrency(item.value)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.noChartData}>No property data</Text>
+              )}
+            </View>
+          </View>
+
+          <View style={{ width: isChartsDualPane ? '50%' : '100%', paddingLeft: isChartsDualPane ? 7 : 0 }}>
+            <View style={[styles.chartCard, { ...sectionCardStyle, paddingVertical: 14, height: '100%' }]}> 
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: semanticColors.violetSoft, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+                    <MaterialCommunityIcons name="account-group-outline" size={16} color={semanticColors.violet} />
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: uiTheme.textPrimary }}>Portfolio Ownership</Text>
+                    <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginLeft: 8 }}>Allocation by entity</Text>
+                  </View>
+                </View>
+              </View>
+
+              {selectedEntity !== 'all' ? (
+                <View style={{ borderRadius: 10, borderWidth: 1, borderColor: uiTheme.divider, backgroundColor: uiTheme.surfaceSoft, padding: 12 }}>
+                  <Text style={{ fontSize: 12, color: uiTheme.textSecondary, marginBottom: 4 }}>Ownership split is shown at portfolio level.</Text>
+                  <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>Switch the entity filter to All to see how ownership is distributed.</Text>
+                </View>
+              ) : loading ? (
+                <ActivityIndicator size="large" color="#2eaf7d" style={{ marginVertical: 24 }} />
+              ) : ownershipLegend.length > 0 ? (
+                <>
+                  <View style={{ flexDirection: 'row', width: '100%', height: 30, borderRadius: 10, overflow: 'hidden', backgroundColor: uiTheme.accentSoft, marginBottom: 12 }}>
+                    {ownershipLegend.map((item) => (
                       <View
                         key={item.key}
-                        style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, marginBottom: 8 }}
+                        style={{
+                          flex: item.percent,
+                          height: '100%',
+                          backgroundColor: item.color,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
                       >
-                        <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: chartColors[idx % chartColors.length], marginRight: 6 }} />
-                        <Text style={{ fontSize: 13, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
-                          {item.label} - {item.percent}%
+                        {item.percent >= 12 && (
+                          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
+                            {item.percent.toFixed(1)}%
+                          </Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+
+                  <View style={{ borderWidth: 1, borderColor: uiTheme.divider, borderRadius: 10, overflow: 'hidden' }}>
+                    {ownershipLegend.map((item, idx) => (
+                      <View key={`${item.key}-ownership`} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, borderBottomWidth: idx === ownershipLegend.length - 1 ? 0 : 1, borderBottomColor: uiTheme.divider, backgroundColor: idx % 2 === 0 ? '#ffffff' : uiTheme.surfaceSoft }}>
+                        <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: item.color, marginRight: 8 }} />
+                        <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1}>
+                          {item.label}
                         </Text>
+                        <Text style={{ fontSize: 11, color: uiTheme.textMuted, width: 54, textAlign: 'right' }}>{item.percent.toFixed(1)}%</Text>
+                        <Text style={{ fontSize: 11, color: uiTheme.textPrimary, fontWeight: '700', width: 96, textAlign: 'right' }}>{formatCurrency(item.value)}</Text>
                       </View>
                     ))}
                   </View>
                 </>
               ) : (
                 <Text style={styles.noChartData}>No ownership data</Text>
-              )
-            )
-          )}
+              )}
+            </View>
+          </View>
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: 2 }}>
-            <View style={{ width: '31%', paddingRight: 7 }}>
-              <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14, marginBottom: layoutRhythm.sectionGap }]}> 
-                <Text style={[styles.label, { marginBottom: 6 }]}>Recent Transactions</Text>
-                {renderRecentTransactionsTimeline('recent-web')}
-              </View>
+            
 
-              <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14, marginBottom: layoutRhythm.sectionGap }]}> 
-                <Text style={[styles.label, { marginBottom: 6 }]}>Portfolio Performance Scoring</Text>
-                <Text style={{ fontSize: 12, color: uiTheme.textMuted, marginBottom: 10 }}>Coming soon</Text>
-                <View style={{ borderRadius: 10, borderWidth: 1, borderColor: uiTheme.divider, backgroundColor: uiTheme.surfaceSoft, padding: 10 }}>
-                  <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>Weighted portfolio scorecard and trend benchmarks will appear here.</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={{ width: '69%', paddingLeft: 7 }}>
+            <View style={{ width: '69%', paddingRight: 7 }}>
               {selectedEntity === 'all' && summaryMetrics && (
                 <View style={[
                   styles.card,
@@ -1458,165 +1433,89 @@ export default function DashboardScreen() {
                 </View>
               )}
 
-              {/* Property Scores + Performer Bands */}
               {propertyScores && propertyScores.length > 0 && (
-                <View style={{ flexDirection: scoringDualPane ? 'row' : 'column', alignItems: 'stretch' }}>
-                  <View style={{ width: scoringDualPane ? '68%' : '100%', paddingRight: scoringDualPane ? 7 : 0 }}>
-                    <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14 }]}> 
-                      <Text style={[styles.label, { marginBottom: 8 }]}>Property Scores</Text>
-                      {propertyScores
-                        .slice()
-                        .sort((a, b) => b.score - a.score)
-                        .map((ps) => {
-                        const isScoreExpanded = !!expandedPropertyScores[String(ps.propertyId)];
-                        return (
-                        <View
-                          key={ps.propertyId}
-                          style={{
-                            marginBottom: 12,
-                            backgroundColor: uiTheme.surfaceSoft,
-                            borderRadius: uiTheme.radiusItem,
-                            borderWidth: 1,
-                            borderColor: uiTheme.border,
-                            paddingVertical: 12,
-                            paddingHorizontal: 12,
-                            paddingRight: 50,
-                            position: 'relative',
-                          }}
+                <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14 }]}> 
+                  <Text style={[styles.label, { marginBottom: 8 }]}>Performance Bands</Text>
+
+                  <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 6 }}>Top Performers</Text>
+                  {topPerformerScores.map((ps) => (
+                    <View key={`top-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, borderRadius: 10, borderWidth: 1, borderColor: uiTheme.divider, backgroundColor: '#eaf8ef', paddingVertical: 8, paddingHorizontal: 10 }}>
+                      <MaterialCommunityIcons name="star" size={17} color="#f4c430" style={{ marginRight: 8 }} />
+                      <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
+                        {ps.address}
+                      </Text>
+                      <View style={{ width: tileIconSizing.scoreBadge, height: tileIconSizing.scoreBadge, borderRadius: tileIconSizing.scoreBadge / 2, backgroundColor: getScoreColor(ps.score), alignItems: 'center', justifyContent: 'center' }}>
+                        <TouchableOpacity
+                          onPress={() => { setSelectedScore(ps); setBreakdownModalVisible(true); }}
+                          style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                          <View
-                            style={{
-                              position: 'absolute',
-                              right: 10,
-                              top: 10,
-                              width: tileIconSizing.scoreBadge,
-                              height: tileIconSizing.scoreBadge,
-                              borderRadius: tileIconSizing.scoreBadge / 2,
-                              backgroundColor: getScoreColor(ps.score),
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            <TouchableOpacity
-                              onPress={() => { setSelectedScore(ps); setBreakdownModalVisible(true); }}
-                              style={{
-                                width: '100%',
-                                height: '100%',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            >
-                              <Text style={{ fontSize: tileIconSizing.scoreBadgeText, fontWeight: '800', color: '#fff' }}>{Math.round(ps.score)}</Text>
-                            </TouchableOpacity>
-                          </View>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                            <MaterialCommunityIcons
-                              name={ps.tag === 'SOLD' ? 'sale' : 'home'}
-                              size={tileIconSizing.propertyHeaderIcon}
-                              color={ps.tag === 'SOLD' ? '#c0392b' : uiTheme.accent}
-                              style={{ marginRight: 8 }}
-                            />
-                            <Text style={{ flex: 1, fontSize: 13, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
-                              {ps.address}
-                            </Text>
-                            <TouchableOpacity
-                              onPress={() => togglePropertyScoreAccordion(ps.propertyId)}
-                              style={{ paddingHorizontal: 6, paddingVertical: 4, marginRight: 22 }}
-                            >
-                              <MaterialCommunityIcons
-                                name={isScoreExpanded ? 'chevron-up' : 'chevron-down'}
-                                size={18}
-                                color={uiTheme.textMuted}
-                              />
-                            </TouchableOpacity>
-                          </View>
-
-                          <View style={{ width: '100%', height: 8, borderRadius: 6, backgroundColor: uiTheme.accentSoft, overflow: 'hidden', marginBottom: 8 }}>
-                            <View style={{ width: `${clampWidth(ps.score)}%`, height: '100%', backgroundColor: getScoreColor(ps.score) }} />
-                          </View>
-
-                          {isScoreExpanded && (
-                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 }}>
-                            {[
-                              { key: 'growth', label: 'Growth', icon: 'trending-up' as const, value: Number.isFinite(ps.growthPct) ? ps.growthPct.toFixed(1) + '%' : '—' },
-                              { key: 'roi', label: 'ROI', icon: 'chart-line' as const, value: Number.isFinite(ps.roiPct) ? ps.roiPct.toFixed(1) + '%' : '—' },
-                              { key: 'cashflow', label: 'Cashflow', icon: 'cash' as const, value: Number.isFinite(ps.cashflowYieldPct) ? ps.cashflowYieldPct.toFixed(1) + '%' : '—' },
-                              { key: 'pl', label: 'P&L', icon: 'finance' as const, value: Number.isFinite(ps.pl) ? '$' + ps.pl.toFixed(2) : '—' },
-                            ].map((metric) => (
-                              <View key={metric.key} style={{ width: '50%', paddingHorizontal: 4, marginBottom: 4 }}>
-                                <View style={{ position: 'relative', paddingRight: tileIconSizing.propertyMetricPaddingRight }}>
-                                  <View
-                                    style={{
-                                      position: 'absolute',
-                                      right: tileIconSizing.propertyMetricIconRight,
-                                      top: tileIconSizing.propertyMetricIconTop,
-                                      width: tileIconSizing.propertyMetricChip,
-                                      height: tileIconSizing.propertyMetricChip,
-                                      borderRadius: tileIconSizing.propertyMetricChip / 2,
-                                      backgroundColor: semanticColors.iconChip,
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                    }}
-                                  >
-                                    <MaterialCommunityIcons name={metric.icon} size={tileIconSizing.propertyMetricIcon} color={uiTheme.textMuted} />
-                                  </View>
-                                  <Text style={{ fontSize: 10, color: uiTheme.textMuted }}>{metric.label}</Text>
-                                  <Text style={{ fontSize: 12, fontWeight: '700', color: uiTheme.textSecondary, marginTop: 1 }}>{metric.value}</Text>
-                                </View>
-                              </View>
-                            ))}
-                          </View>
-                          )}
-                        </View>
-                      )})}
+                          <Text style={{ fontSize: tileIconSizing.scoreBadgeText, fontWeight: '800', color: '#fff' }}>{Math.round(ps.score)}</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
+                  ))}
+                  {topPerformerScores.length === 0 && (
+                    <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 8 }}>No top performers.</Text>
+                  )}
 
-                  <View style={{ width: scoringDualPane ? '32%' : '100%', paddingLeft: scoringDualPane ? 7 : 0 }}>
-                    <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14 }]}> 
-                      <Text style={[styles.label, { marginBottom: 8 }]}>Performer Bands</Text>
+                  <View style={{ height: 1, backgroundColor: uiTheme.divider, marginVertical: 8 }} />
 
-                      <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 6 }}>Top Performers</Text>
-                      {propertyScores
-                        .filter((ps) => ps.score >= 70)
-                        .slice()
-                        .sort((a, b) => b.score - a.score)
-                        .slice(0, 3)
-                        .map((ps) => (
-                          <View key={`top-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                            <MaterialCommunityIcons name="star" size={17} color="#f4c430" style={{ marginRight: 8 }} />
-                            <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
-                              {ps.address}
-                            </Text>
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: getScoreColor(ps.score) }}>{Math.round(ps.score)}</Text>
-                          </View>
-                        ))}
-                      {!propertyScores.some((ps) => ps.score >= 70) && (
-                        <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 8 }}>No high performers yet.</Text>
-                      )}
-
-                      <View style={{ height: 1, backgroundColor: uiTheme.divider, marginVertical: 8 }} />
-
-                      <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 6 }}>Low Performers</Text>
-                      {propertyScores
-                        .filter((ps) => ps.score < 50)
-                        .sort((a, b) => a.score - b.score)
-                        .slice(0, 3)
-                        .map((ps) => (
-                          <View key={`low-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                            <MaterialCommunityIcons name="alert" size={17} color={uiTheme.danger} style={{ marginRight: 8 }} />
-                            <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">{ps.address}</Text>
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: uiTheme.danger }}>{Math.round(ps.score)}</Text>
-                          </View>
-                        ))}
-                      {!propertyScores.some((ps) => ps.score < 50) && (
-                        <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>No low performers.</Text>
-                      )}
+                  <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 6 }}>Low Performers</Text>
+                  {lowPerformerScores.map((ps) => (
+                    <View key={`low-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, borderRadius: 10, borderWidth: 1, borderColor: uiTheme.divider, backgroundColor: '#fdecec', paddingVertical: 8, paddingHorizontal: 10 }}>
+                      <MaterialCommunityIcons name="alert" size={17} color={uiTheme.danger} style={{ marginRight: 8 }} />
+                      <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
+                        {ps.address}
+                      </Text>
+                      <View style={{ width: tileIconSizing.scoreBadge, height: tileIconSizing.scoreBadge, borderRadius: tileIconSizing.scoreBadge / 2, backgroundColor: getScoreColor(ps.score), alignItems: 'center', justifyContent: 'center' }}>
+                        <TouchableOpacity
+                          onPress={() => { setSelectedScore(ps); setBreakdownModalVisible(true); }}
+                          style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Text style={{ fontSize: tileIconSizing.scoreBadgeText, fontWeight: '800', color: '#fff' }}>{Math.round(ps.score)}</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
+                  ))}
+                  {lowPerformerScores.length === 0 && (
+                    <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 8 }}>No low performers.</Text>
+                  )}
+
+                  <View style={{ height: 1, backgroundColor: uiTheme.divider, marginVertical: 8 }} />
+
+                  <Text style={{ fontSize: 11, color: uiTheme.textMuted, marginBottom: 6 }}>Stable</Text>
+                  {stablePerformerScores.map((ps) => (
+                    <View key={`stable-${ps.propertyId}`} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, borderRadius: 10, borderWidth: 1, borderColor: uiTheme.divider, backgroundColor: uiTheme.surfaceSoft, paddingVertical: 8, paddingHorizontal: 10 }}>
+                      <MaterialCommunityIcons name="minus-circle-outline" size={17} color={uiTheme.textMuted} style={{ marginRight: 8 }} />
+                      <Text style={{ flex: 1, fontSize: 12, color: uiTheme.textSecondary }} numberOfLines={1} ellipsizeMode="tail">
+                        {ps.address}
+                      </Text>
+                      <View style={{ width: tileIconSizing.scoreBadge, height: tileIconSizing.scoreBadge, borderRadius: tileIconSizing.scoreBadge / 2, backgroundColor: getScoreColor(ps.score), alignItems: 'center', justifyContent: 'center' }}>
+                        <TouchableOpacity
+                          onPress={() => { setSelectedScore(ps); setBreakdownModalVisible(true); }}
+                          style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Text style={{ fontSize: tileIconSizing.scoreBadgeText, fontWeight: '800', color: '#fff' }}>{Math.round(ps.score)}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                  {stablePerformerScores.length === 0 && (
+                    <Text style={{ fontSize: 11, color: uiTheme.textMuted }}>No stable properties.</Text>
+                  )}
                 </View>
               )}
+            </View>
+            <View style={{ width: '31%', paddingLeft: 7 }}>
+              <View style={[styles.card, { ...sectionCardStyle, paddingVertical: 14, marginBottom: layoutRhythm.sectionGap }]}> 
+                <Text style={[styles.label, { marginBottom: 6 }]}>Recent Transactions</Text>
+                {renderRecentTransactionsTimeline('recent-web')}
+              </View>
+
+              
             </View>
           </View>
 
