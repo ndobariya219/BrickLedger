@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "test": "jest --watchAll",
     "predeploy": "expo export -p web",
-    "deploy": "gh-pages --nojekyll -d dist"
+    "deploy": "gh-pages -d dist --cname app.arth-homes.com.au"
   },
   "jest": {
     "preset": "jest-expo"
